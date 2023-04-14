@@ -2,7 +2,7 @@ import ast
 import numcodecs
 from numcodecs.abc import Codec
 import numpy as np
-
+import threading
 
 class FillStringsCodec(Codec):
     """Sets fixed-length string fields to empty
@@ -10,7 +10,6 @@ class FillStringsCodec(Codec):
     To be used with HDF fields of strings, to fill in the valules of the opaque
     16-byte string IDs.
     """
-
     codec_id = "fill_hdf_strings"
 
     def __init__(self, dtype, id_map=None):
@@ -65,11 +64,11 @@ class FillStringsCodec(Codec):
 
 numcodecs.register_codec(FillStringsCodec, "fill_hdf_strings")
 
-
 class GRIBCodec(numcodecs.abc.Codec):
     """
     Read GRIB stream of bytes as a message using eccodes
     """
+    eclock = threading.RLock()
 
     codec_id = "grib"
 
@@ -90,18 +89,19 @@ class GRIBCodec(numcodecs.abc.Codec):
         else:
             var = "values"
             dt = self.dtype or "float32"
-        mid = eccodes.codes_new_from_message(bytes(buf))
-        try:
-            data = eccodes.codes_get_array(mid, var)
-        finally:
-            eccodes.codes_release(mid)
+        with self.eclock:
+            mid = eccodes.codes_new_from_message(bytes(buf))
+            try:
+                data = eccodes.codes_get_array(mid, var)
+            finally:
+                eccodes.codes_release(mid)
 
-        if var == "values" and eccodes.codes_get_string(mid, "missingValue"):
-            data[data == float(eccodes.codes_get_string(mid, "missingValue"))] = np.nan
-        if out is not None:
-            return numcodecs.compat.ndarray_copy(data, out)
-        else:
-            return data.astype(dt)
+            if var == "values" and eccodes.codes_get_string(mid, "missingValue"):
+                data[data == float(eccodes.codes_get_string(mid, "missingValue"))] = np.nan
+            if out is not None:
+                return numcodecs.compat.ndarray_copy(data, out)
+            else:
+                return data.astype(dt)
 
 
 numcodecs.register_codec(GRIBCodec, "grib")
